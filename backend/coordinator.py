@@ -280,3 +280,99 @@ def attach_coordinator(app: FastAPI, store):
             raise HTTPException(503, "No se pudo restablecer todo; recuperá los servicios y repetí el restablecimiento")
         finally:
             state.resetting = False
+
+    async def run_load(body, run):
+        previous_settings = state.settings
+        state.settings = Settings(payment_delay_ms=body.payment_delay_ms, step_delay_ms=0, rate_limit=body.scenario == "rate", bulkhead=body.scenario in {"bulkhead", "backpressure"})
+        state.limiter = RateLimiter()
+        base = os.getenv("SELF_URL", "http://127.0.0.1:8000")
+        start = time.monotonic()
+        latencies = []
+        statuses = Counter()
+        finished = asyncio.Event()
+        try:
+            initial = await get_remote("payments", "/metrics")
+            # Per-run peaks are sampled; participant lifetime peaks remain separate.
+            run["baseline_rejected"] = initial["rejected"]
+            async with httpx.AsyncClient(timeout=60, limits=httpx.Limits(max_connections=100)) as client:
+                async def monitor():
+                    while not finished.is_set():
+                        tick = time.monotonic()
+                        sample = {"second": round(tick - start, 1)}
+                        try:
+                            response = await client.get(base + "/api/catalog", timeout=3)
+                            sample["catalog_ok"] = response.is_success
+                            sample["latency_ms"] = round((time.monotonic() - tick) * 1000, 1)
+                        except httpx.HTTPError:
+                            sample.update(catalog_ok=False, latency_ms=3000)
+                        try:
+                            metric = await get_remote("payments", "/metrics")
+                            sample.update(active=metric["active"], waiting=metric["waiting"])
+                            run["peak_active"] = max(run["peak_active"], metric["active"])
+                            run["peak_waiting"] = max(run["peak_waiting"], metric["waiting"])
+                        except RemoteFailure:
+                            sample.update(active=0, waiting=0)
+                        run["samples"].append(sample)
+                        await asyncio.sleep(0.2)
+
+                async def send(index):
+                    begun = time.monotonic()
+                    for attempt in range(4 if body.scenario == "backpressure" else 1):
+                        try:
+                            response = await client.post(base + "/api/purchases", json={"event_id": "neon"}, headers={"X-Demo-Client": run["id"]})
+                            code = response.status_code
+                            statuses[str(code)] += 1
+                            run["http_statuses"] = dict(statuses)
+                            run["attempts"] += 1
+                            data = response.json()
+                            is_overload = code == 503 and any(e["message"] in {"bulkhead_full", "queue_timeout"} for e in data.get("events", []))
+                            # A compensated purchase is terminal. A retry starts a NEW purchase.
+                            if body.scenario == "backpressure" and is_overload and data.get("status") == "compensated" and attempt < 3:
+                                run["retries"] += 1
+                                await asyncio.sleep(float(response.headers.get("Retry-After", 1)) * (attempt + 1) + (index % 7) * 0.07)
+                                continue
+                            if code == 200 and data.get("status") == "confirmed":
+                                run["confirmed"] += 1
+                            else:
+                                run["rejected"] += 1
+                        except (httpx.HTTPError, ValueError):
+                            run["errors"] += 1
+                        break
+                    latencies.append((time.monotonic() - begun) * 1000)
+                    run["completed"] += 1
+
+                monitor_task = asyncio.create_task(monitor())
+                try:
+                    await asyncio.gather(*(send(i) for i in range(body.count)))
+                finally:
+                    finished.set()
+                    await monitor_task
+            run["status"] = "completed"
+            run["duration_seconds"] = round(time.monotonic() - start, 2)
+            run["p95_ms"] = round(sorted(latencies)[max(0, math.ceil(len(latencies) * .95) - 1)], 1)
+            healthy = bool(run["samples"]) and all(s["catalog_ok"] for s in run["samples"])
+            run["checks"] = {"catalog_available": healthy, "all_requests_finished": run["completed"] == body.count and run["errors"] == 0}
+            if body.scenario == "rate":
+                run["checks"]["http_429_observed"] = statuses["429"] > 0
+            if body.scenario in {"bulkhead", "backpressure"}:
+                run["checks"].update(concurrency_bounded=0 < run["peak_active"] <= 3, queue_bounded=run["peak_waiting"] <= 5, overload_observed=statuses["503"] > 0)
+            if body.scenario == "unprotected":
+                run["checks"]["concurrency_exceeds_three"] = run["peak_active"] > 3
+        except Exception as exc:
+            run.update(status="failed", error=str(exc) or type(exc).__name__)
+        finally:
+            state.settings = previous_settings
+            state.limiter = RateLimiter()
+
+    @app.post("/api/load", status_code=202)
+    async def load(body: LoadRequest):
+        ensure_idle()
+        state.run = {"id": str(uuid.uuid4()), "scenario": body.scenario, "count": body.count, "status": "running", "created_at": now(), "completed": 0, "confirmed": 0, "rejected": 0, "errors": 0, "attempts": 0, "retries": 0, "peak_active": 0, "peak_waiting": 0, "samples": [], "http_statuses": {}, "checks": {}}
+        state.load_task = asyncio.create_task(run_load(body, state.run))
+        return state.run
+
+    @app.get("/api/load/{run_id}")
+    async def load_result(run_id: str):
+        if not state.run or state.run["id"] != run_id:
+            raise HTTPException(404, "Ejecución inexistente; se conserva la última")
+        return state.run
