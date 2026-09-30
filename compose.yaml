@@ -1,0 +1,66 @@
+name: devoss-tickets
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  init: true
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
+
+services:
+  reservations:
+    <<: *backend
+    environment:
+      SERVICE_ROLE: reservations
+    volumes: ["reservations-data:/data"]
+  payments:
+    <<: *backend
+    environment:
+      SERVICE_ROLE: payments
+    volumes: ["payments-data:/data"]
+  confirmations:
+    <<: *backend
+    environment:
+      SERVICE_ROLE: confirmations
+    volumes: ["confirmations-data:/data"]
+  coordinator:
+    <<: *backend
+    environment:
+      SERVICE_ROLE: coordinator
+      RESERVATIONS_URL: http://reservations:8000
+      PAYMENTS_URL: http://payments:8000
+      CONFIRMATIONS_URL: http://confirmations:8000
+    volumes: ["coordinator-data:/data"]
+    depends_on:
+      reservations: { condition: service_healthy }
+      payments: { condition: service_healthy }
+      confirmations: { condition: service_healthy }
+    ports: ["127.0.0.1:8000:8000"]
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    depends_on:
+      coordinator: { condition: service_healthy }
+    ports: ["127.0.0.1:8080:80"]
+  verify:
+    <<: *backend
+    profiles: ["tools"]
+    user: "10001"
+    environment:
+      API_URL: http://coordinator:8000
+    volumes: ["./scripts:/app/scripts:ro"]
+    depends_on:
+      coordinator: { condition: service_healthy }
+    command: ["python", "scripts/demo.py", "all"]
+    healthcheck: { disable: true }
+
+volumes:
+  reservations-data:
+  payments-data:
+  confirmations-data:
+  coordinator-data:
