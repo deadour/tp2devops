@@ -20,7 +20,7 @@ def create_app(role=None, data_dir=None):
         async with httpx.AsyncClient(timeout=25, limits=httpx.Limits(max_connections=120)) as client:
             app.state.client = client
             yield
-            if role == "coordinator" and hasattr(app.state, "tasks"):
+            if role == "coordinator":
                 import asyncio
                 pending = list(app.state.tasks.values())
                 if app.state.load_task:
@@ -37,7 +37,8 @@ def create_app(role=None, data_dir=None):
         return {"status": "ok", "service": role}
 
     if role == "coordinator":
-        pass  # La orquestación se incorpora en el siguiente paso.
+        from backend.coordinator import attach_coordinator
+        attach_coordinator(app, store)
     else:
         attach_participant(app, role, store)
     return app
