@@ -8,7 +8,7 @@ La aplicación combina una tienda de entradas con un laboratorio de carga. Los c
 
 ![Boletería y seguimiento de Saga](docs/images/boleteria.png)
 
-[Ver el laboratorio de carga](docs/images/laboratorio.png) · [Presentación y guion](docs/PRESENTACION.md) · [Validación realizada](docs/VALIDACION.md)
+[Ver el laboratorio de carga](docs/images/laboratorio.png)
 
 ## Ejecutar con contenedores
 
@@ -191,8 +191,6 @@ Los participantes exponen `/reserve`, `/release`, `/charge`, `/refund`, `/confir
 - El reset entre servicios es una operación administrativa de demostración, no una Saga transaccional. Si falla parcialmente, recuperar los servicios y repetirlo.
 - No hay pagos reales, usuarios, correos ni integraciones externas. Las fuentes web son opcionales: hay tipografías locales de respaldo.
 
-## Presentación
-
-Guion de aproximadamente diez minutos y diapositivas: [docs/PRESENTACION.md](docs/PRESENTACION.md).
+## Referencias
 
 Referencias: [Saga](https://learn.microsoft.com/en-us/azure/architecture/patterns/saga), [Bulkhead](https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead), [Throttling](https://learn.microsoft.com/en-us/azure/architecture/patterns/throttling), [ciclo de vida de FastAPI](https://fastapi.tiangolo.com/advanced/events/), [orden de inicio y healthchecks en Compose](https://docs.docker.com/compose/how-tos/startup-order/).
