@@ -1,18 +1,23 @@
-# DevOss Tickets
+# Equipo DevOss
 
-Una boletería de conciertos para ver **Sagas, compensaciones, bulkheads, rate limiting y backpressure** funcionando. Equipo 7 · DevOss · Temas 12 y 14.
+Temas asignados:
 
-Esta base fue importada del prototipo previo y organizada en commits por componente. Los commits de importación no representan aportes de otros integrantes.
+| Nro | Categoria | Tema | Pregunta guía | Demo sugerida |
+|---|---|---|---|---|
+| 12 | Consistencia | Saga y transacciones distribuidas | ¿Cómo coordinar varios servicios cuando una operación parcial falla? | Simular reserva, pago y confirmación, hacer fallar el último paso y ejecutar acciones compensartorias |
+|14| Resiliancia | Bulkhead, rate limiting y backpressure | ¿Cómo proteger recursos ante exceso de solicitudes o consumidores lentos? | Enviar ráfagas concurrentes y demostrar rechazo 429 o límite de concurrencia sin bloquear toda la aplicación |
 
-La aplicación combina una tienda de entradas con un laboratorio de carga. Los cambios se ejecutan en cuatro servicios HTTP y bases SQLite independientes; la pantalla consulta sus estados reales.
+# Aplicación: boletería de eventos
+
+La aplicación tiene dos modulos:
+1. La tienda de entradas, que simula ser la aplicación real
+2. Un laboratorio de carga en el cual podemos poner a prubar el sistema enviando una rafaga de solicitudes.
 
 ![Boletería y seguimiento de Saga](docs/images/boleteria.png)
 
 [Ver el laboratorio de carga](docs/images/laboratorio.png)
 
 ## Ejecutar con contenedores
-
-Requisitos: Docker Engine con el plugin Docker Compose, o Docker Desktop con contenedores Linux. La primera construcción descarga imágenes y dependencias. Puertos disponibles: `8080` y `8000`.
 
 Desde la raíz del repositorio:
 
@@ -22,7 +27,6 @@ docker compose up --build
 
 - Aplicación: **http://localhost:8080**
 - API y documentación interactiva: **http://localhost:8000/docs**
-- Esperar a que aparezcan los cuatro servicios online en la aplicación.
 - También se puede iniciar en segundo plano con `docker compose up --build -d`.
 
 ```sh
@@ -37,22 +41,7 @@ docker compose down
 docker compose down -v
 ```
 
-### Windows sin Docker Desktop
-
-También se puede ejecutar Docker Engine directamente dentro de Ubuntu en WSL 2. No alcanza con instalar solamente el cliente `docker` en Windows.
-
-1. En PowerShell como administrador: `wsl --install -d Ubuntu`. Reiniciar si Windows lo solicita y completar la creación del usuario de Ubuntu.
-2. Verificar con `wsl -l -v` que Ubuntu usa la versión 2. Si corresponde: `wsl --set-version Ubuntu 2`.
-3. Dentro de Ubuntu, seguir la [instalación oficial de Docker Engine mediante el repositorio apt](https://docs.docker.com/engine/install/ubuntu/#install-using-the-apt-repository). Instalar también `docker-buildx-plugin` y `docker-compose-plugin`, incluidos en esa guía.
-4. Arrancar el daemon: `sudo service docker start`. Verificar con `sudo docker run --rm hello-world` y `sudo docker compose version`.
-5. Abrir este proyecto dentro de Ubuntu. Para la ubicación actual: `cd /mnt/d/Antiquo/Documents/GitHub/tp2devops`.
-6. Ejecutar `sudo docker compose up --build` y abrir http://localhost:8080 desde Windows.
-
-Los comandos Docker de este README se ejecutan dentro de Ubuntu con `sudo` en esa modalidad. Si preferís un único instalador, [Docker Desktop con WSL 2](https://docs.docker.com/desktop/features/wsl/) gestiona el motor y Compose. No es necesario instalar ambas alternativas. [Instalación de WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
-
-Si Docker Desktop informa **Virtual Machine Platform not enabled**, habilitar **Plataforma de máquina virtual** en “Activar o desactivar las características de Windows” y reiniciar. Si la virtualización sigue sin detectarse, revisar su habilitación en BIOS/UEFI. También se necesita espacio libre para WSL y las imágenes. La app puede probarse localmente mientras se prepara Docker, pero la entrega de la materia debe demostrarse con contenedores.
-
-## Recorrido para presentar
+### Flujos de prueba
 
 ### 1. Compra exitosa
 
