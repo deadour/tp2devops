@@ -7,6 +7,37 @@ Temas asignados:
 | 12 | Consistencia | Saga y transacciones distribuidas | ¿Cómo coordinar varios servicios cuando una operación parcial falla? | Simular reserva, pago y confirmación, hacer fallar el último paso y ejecutar acciones compensartorias |
 |14| Resiliancia | Bulkhead, rate limiting y backpressure | ¿Cómo proteger recursos ante exceso de solicitudes o consumidores lentos? | Enviar ráfagas concurrentes y demostrar rechazo 429 o límite de concurrencia sin bloquear toda la aplicación |
 
+
+## Conceptos teóricos clave
+
+Este proyecto demuestra dos desafíos fundamentales en arquitecturas de sistemas distribuidos y microservicios: la **consistencia eventual** y la **resiliencia ante sobrecarga**.
+
+### 1. Orquestador de Saga (Saga Pattern)
+En arquitecturas de microservicios donde cada servicio gestiona su propia base de datos (*Database-per-Service*), no es viable utilizar transacciones distribuidas ACID tradicionales (como Two-Phase Commit / 2PC) debido a los bloqueos prolongados y al fuerte acoplamiento que generan.
+
+El patrón **Saga** resuelve este problema modelando una transacción distribuida como una secuencia de **transacciones locales**:
+- **Flujo normal (Happy Path):** Los pasos de negocio se ejecutan de manera secuencial (reservar entrada $\rightarrow$ cobrar $\rightarrow$ confirmar compra).
+- **Acciones compensatorias:** Si un paso intermedio falla (o se produce un error/timeout de red), el sistema no puede hacer un `ROLLBACK` global automático. En su lugar, ejecuta transacciones compensatorias en orden inverso para deshacer semánticamente los cambios ya confirmados (reembolsar el pago y liberar la reserva de stock).
+- **Orquestación centralizada:** En lugar de una coreografía (donde los servicios reaccionan de manera desacoplada a eventos pub/sub), se utiliza un **Orquestador o Coordinador central**. Este componente dirige explícitamente qué servicio debe invocar en cada momento, registra la bitácora de ejecución (*timeline*) y decide cuándo disparar las compensaciones.
+
+### 2. Rate Limiting (Limitación de tasa)
+El **Rate Limiting** es una técnica de control de tráfico que restringe la cantidad de solicitudes que un cliente o identidad puede realizar en una ventana de tiempo predeterminada (por ejemplo, hasta 10 solicitudes por segundo).
+- **Propósito:** Proteger las APIs contra abusos, ráfagas imprevistas, scraping o ataques de denegación de servicio (DoS), garantizando la equidad de uso (*fair share*).
+- **Comportamiento:** Se evalúa de manera fija e independiente del uso de CPU o memoria del servidor. Si el cliente supera su cuota permitida, las solicitudes adicionales se rechazan de inmediato con el código HTTP **`429 Too Many Requests`** y el encabezado `Retry-After`. En este proyecto se implementa mediante el algoritmo de **Token Bucket** (balde de tokens).
+
+### 3. Bulkhead (Compartimentos estancos)
+Inspirado en los mamparos divisorios de los barcos que evitan que una vía de agua en un compartimento hunda toda la nave, el patrón **Bulkhead** aisla y particiona los recursos críticos del sistema (como hilos de procesamiento, cupos concurrentes o conexiones a bases de datos).
+- **Propósito:** Evitar fallos en cascada. Si un servicio dependiente o consumidor se vuelve lento (por ejemplo, una pasarela de pagos con demoras artificiales), el impacto queda confinado a su propio compartimento.
+- **Comportamiento:** Se define un límite de concurrencia y una cola finita para la operación crítica (aquí: 3 operaciones activas y 5 en espera). Si se saturan, solo fallan las peticiones dirigidas a ese recurso específico (con **`503 Service Unavailable`** y mensaje `bulkhead_full`), mientras que otros servicios independientes (como la consulta y navegación del catálogo de eventos) continúan respondiendo con normalidad y baja latencia.
+
+### 4. Backpressure (Contrapresión)
+El patrón **Backpressure** es un principio de control de flujo en el cual un consumidor o servicio receptor que se encuentra saturado transmite resistencia hacia atrás (*upstream*), indicándole al productor o emisor que debe **frenar y modular su ritmo de envío**.
+- **Propósito:** Evitar que los receptores colapsen ante ráfagas desmedidas, impidiendo el desbordamiento de búferes o el agotamiento de memoria (*Out Of Memory*).
+- **Diferencia con Rate Limiting:** Mientras que Rate Limiting aplica una cuota fija de tiempo (sin importar si el servidor está ocioso o sobrecargado), Backpressure es **dinámico y reactivo a la saturación real** del sistema.
+- **Implementación en HTTP:** En arquitecturas HTTP/REST, donde el cliente "empuja" peticiones de forma asíncrona, la contrapresión se concreta mediante dos partes:
+  1. **Descarte controlado (*Load Shedding*):** El servicio saturado rechaza el exceso mediante HTTP `503` y envía el encabezado `Retry-After: 1`.
+  2. **Adaptación del cliente/productor:** El emisor no insiste a ciegas; modula su velocidad respetando la pausa indicada, aplicando retroceso progresivo (*exponential backoff*) y dispersión aleatoria (*jitter*) antes de reintentar, evitando el problema del rebaño atronador (*thundering herd*).
+
 # Aplicación: boletería de eventos
 
 La aplicación tiene dos modulos:
